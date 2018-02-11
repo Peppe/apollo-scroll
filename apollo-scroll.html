@@ -15,6 +15,7 @@
 
       #content {
         background: turquoise;
+        width: fit-content;
       }
 
       #top {
@@ -23,9 +24,7 @@
       #bottom {
         background-color: violet;
       }
-      .rows {
-        
-      }
+
       .row {
         white-space: nowrap;
         font-size:0;
@@ -78,17 +77,9 @@
             type: Number,
             value: 0
           },
-          rendering: {
-            type: Boolean,
-            valeue: false
-          },
           dataIndex: {
             type: Number,
             value: 0
-          },
-          dataLenght: {
-            type: Number,
-            value: 10
           },
           fullHeight: {
             type: Number,
@@ -112,17 +103,33 @@
         // work until after first paint.
         Polymer.RenderStatus.afterNextRender(this, function() {
           this._loadInitialData();
-          this.$.container.addEventListener('scroll', (evt) => {
-            this._onScroll()
-          }, {
+          const context = this;
+          const updateLayout = this._debounce(function() {
+            context._update();
+          }, 30);
+          this.$.container.addEventListener('scroll', updateLayout, {
             capture: true,
             passive: true
           })
         });
       }
+
+      _debounce(func, wait) {
+        
+        return function() {
+          const context = this;
+          let timeout;
+          const later = function() {
+            timeout = null;
+            func.apply(context);
+          };
+          clearTimeout(timeout);
+          timeout = setTimeout(later, wait);
+        };
+      };
+
       _getRowClass(special) {
-        console.log("in class function");
-        return special ? "special" : "row";
+        return special ? "special" : "";
       }
 
       _loadInitialData(){
@@ -133,19 +140,7 @@
         const rowCount = this._getCount();
         this.fullHeight = rowCount * this.oneRowHeight;
         this._appendRows(10,neededRowAmounts-10);
-        this.dataLenght=35;
         this.$.bottom.style.height = this.fullHeight- (this.$.content.offsetHeight) + "px" ;
-      }
-      
-      _onScroll() {
-        this.currentScrollPosition = this.$.container.scrollTop;
-        const that = this;
-        if(!this.rendering){
-          Polymer.Async.animationFrame.run(function(){
-            that._update();
-          },100);
-        }
-        this.rendering = true;
       }
 
       _update(){
@@ -153,56 +148,42 @@
         const viewportTop = this.$.container.scrollTop;
         const viewportHeight = this.$.container.offsetHeight;
         const renderedRowsTop = this.$.top.offsetHeight;
-        const renderedRowsHeight = 3*viewportHeight;
-        const shiftUpwardsBreakpoint = renderedRowsTop + 0.5*viewportHeight;
-        const shiftDownwardsBreakpoint = renderedRowsTop + 2.5*viewportHeight;      
+        const renderedRowsHeight = 5*viewportHeight;
+        const shiftUpwardsBreakpoint = renderedRowsTop + 1*viewportHeight;
+        const shiftDownwardsBreakpoint = renderedRowsTop + 3*viewportHeight;      
+        this.currentScrollPosition = this.$.container.scrollTop;
         
-
-       
-        if(this.currentScrollPosition<shiftUpwardsBreakpoint){
-           // scroll upwards if above upward breakpoint
-          this._shiftUpwards(renderedRowsTop,renderedRowsHeight,viewportHeight);
-          // Prohibit extra scroll events that would make this code run amok.
-          this.$.container.scrollTop = this.currentScrollPosition;
-        } else if(this.currentScrollPosition+viewportHeight>shiftDownwardsBreakpoint){
-          // scroll downwards if below downwards breakpoint
-          this._shiftDownwards(renderedRowsTop,renderedRowsHeight,viewportHeight);
-          // Prohibit extra scroll events that would make this code run amok.
-          this.$.container.scrollTop = this.currentScrollPosition;
+       // First checks that should we go up and not already in top.
+       // Second checks that should we go down and not already at bottom.
+        if((viewportTop<shiftUpwardsBreakpoint && renderedRowsTop !=0) ||
+          (viewportTop+viewportHeight>shiftDownwardsBreakpoint) && (renderedRowsTop + renderedRowsHeight < this.fullHeight)){
+          const newRenderedRowsTop = viewportTop-2*viewportHeight
+          this._shiftRows(newRenderedRowsTop,renderedRowsHeight,viewportTop,viewportHeight);
         }
-        this.rendering = false;
       }
 
-      _shiftUpwards(renderedRowsTop,renderedRowsHeight,viewportHeight){
+      _shiftRows(renderedRowsTop, renderedRowsHeight, viewportTop, viewportHeight){
         let newRenderedRowsTop = renderedRowsTop-viewportHeight;
         if(newRenderedRowsTop<0){
           newRenderedRowsTop = 0;
         }
-        this._shiftRows(newRenderedRowsTop, renderedRowsHeight);
-          
-        const rowsBeforeNewTop = Math.floor(newRenderedRowsTop / this.oneRowHeight);
-        const rowsInRange = Math.ceil(renderedRowsHeight / this.oneRowHeight);
-        this._loadData(rowsBeforeNewTop, rowsInRange);
-      }
-
-      _shiftDownwards(renderedRowsTop,renderedRowsHeight,viewportHeight){
-        let newRenderedRowsTop = renderedRowsTop+viewportHeight;
-          if(newRenderedRowsTop>this.fullHeight-3*viewportHeight){
+        if(newRenderedRowsTop>this.fullHeight-3*viewportHeight){
             newRenderedRowsTop = this.fullHeight-3*viewportHeight;
-          }
-          
-          //TODO: Shift with a few pixels to make the row placements match.
-          this._shiftRows(newRenderedRowsTop, renderedRowsHeight);
-          
-          const rowsBeforeNewTop = Math.floor(newRenderedRowsTop / this.oneRowHeight);
-          const rowsInRange = Math.ceil(renderedRowsHeight / this.oneRowHeight);
-          this._loadData(rowsBeforeNewTop, rowsInRange);
-      }
+        }
+        const rowsBeforeNewTop = Math.floor(newRenderedRowsTop / this.oneRowHeight);
+        let rowsInRange = Math.ceil(renderedRowsHeight / this.oneRowHeight);
+        const totalRows = this._getCount();
+        if(rowsBeforeNewTop+rowsInRange>totalRows){
+          rowsInRange=totalRows-rowsBeforeNewTop;
+          console.log("start: " + rowsBeforeNewTop + ", end: " + (rowsBeforeNewTop+rowsInRange));
+        }
+        const pixelsLeftBelow = (this._getCount()-(rowsBeforeNewTop+rowsInRange))*this.oneRowHeight;
+        this.$.top.style.height = newRenderedRowsTop + "px";
+        this.$.bottom.style.height = pixelsLeftBelow + "px" ;
+        // Prohibit extra scroll events that would make this code run amok.
+        this.$.container.scrollTop = this.currentScrollPosition;
 
-      _shiftRows(top, renderedRowsHeight){
-        this.$.top.style.height = top + "px";
-        console.log(this.$.content.offsetHeight);
-        this.$.bottom.style.height = this.fullHeight- (top + this.$.content.offsetHeight) + "px" ;
+        this._loadData(rowsBeforeNewTop, rowsInRange);
       }
 
       _loadData(start, amount){
@@ -243,7 +224,7 @@
         row.index = index;
         row.data = [];
         for(let column = 0; column < 20; column++){
-          row.data[column] = "Row " + (index+1) +", Column " + (column+1);
+          row.data[column] = "Row " + (index) +", Column " + (column);
         }
         if(index%8 == 0){
           row.special = true;
@@ -252,7 +233,7 @@
       }
 
       _getCount(){
-        return 412;
+        return 4123;
       }
     }
 
