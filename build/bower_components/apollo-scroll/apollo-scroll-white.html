@@ -1,0 +1,243 @@
+<link rel="import" href="../polymer/polymer-element.html">
+
+<dom-module id="apollo-scroll">
+  <template>
+    <style>
+      :host {
+        display: block;
+      }
+
+      #container {
+        height:300px;
+        width:100%;
+        overflow: scroll;
+        -webkit-overflow-scrolling: touch;
+      }
+
+      #content {
+        background: turquoise;
+        width: fit-content;
+      }
+
+      #top {
+       height: 0;
+      }
+      #bottom {
+        background-color: violet;
+      }
+
+      .row {
+        white-space: nowrap;
+        font-size:0;
+      }
+      
+      .row.special {
+        background-color: goldenrod;
+      }
+      .cell {
+        width:150px;
+        display:inline-block;
+        margin: -1px 0 0 -1px;
+        padding: 4px;
+        border:1px solid gray;
+        font-size: 14px;
+      }
+    </style>
+    <div id="container">
+        <div id="top"></div>
+        <div id="content">
+          <div id="rows">
+            <template is="dom-repeat" items="{{rows}}">
+              <div class$="row [[_getRowClass(item.special)]]">
+                  <template is="dom-repeat" items="{{item.data}}">
+                    <div class="cell">{{item}}</div>
+                  </template>
+              </div>
+            </template>
+          </div>
+        </div>
+        <div id="bottom"></div>
+    </div>
+    <h2>Hello [[prop1]]!</h2>
+  </template>
+
+  <script>
+    /**
+     * `apollo-scroll`
+     * 
+     *
+     * @customElement
+     * @polymer
+     * @demo demo/index.html
+     */
+    class ApolloScroll extends Polymer.Element {
+      static get is() { return 'apollo-scroll'; }
+      static get properties() {
+        return {
+          currentScrollPosition: {
+            type: Number,
+            value: 0
+          },
+          dataIndex: {
+            type: Number,
+            value: 0
+          },
+          fullHeight: {
+            type: Number,
+            value: 1000
+          },
+          oneRowHeight: {
+            type: Number,
+            value: 0
+          },
+          rows: {
+            type: Array,
+            notify: true,
+            value: function() { return []; }
+          }
+        };
+      }
+      constructor() {
+        super();
+        this._getInitialData();
+        // When possible, use afterNextRender to defer non-critical
+        // work until after first paint.
+        Polymer.RenderStatus.afterNextRender(this, function() {
+          this._loadInitialData();
+          const context = this;
+          const updateLayout = this._debounce(function() {
+            context._update();
+          }, 30);
+          this.$.container.addEventListener('scroll', updateLayout, {
+            capture: true,
+            passive: true
+          })
+        });
+      }
+
+      _debounce(func, wait) {
+        
+        return function() {
+          const context = this;
+          let timeout;
+          const later = function() {
+            timeout = null;
+            func.apply(context);
+          };
+          clearTimeout(timeout);
+          timeout = setTimeout(later, wait);
+        };
+      };
+
+      _getRowClass(special) {
+        return special ? "special" : "";
+      }
+
+      _loadInitialData(){
+        const tenRowsHeight = this.$.rows.offsetHeight;
+        this.oneRowHeight = tenRowsHeight / 10;
+        const viewportHeight = this.$.container.offsetHeight;
+        const neededRowAmounts = Math.ceil(viewportHeight / this.oneRowHeight * 3);
+        const rowCount = this._getCount();
+        this.fullHeight = rowCount * this.oneRowHeight;
+        this._appendRows(10,neededRowAmounts-10);
+        this.$.bottom.style.height = this.fullHeight- (this.$.content.offsetHeight) + "px" ;
+      }
+
+      _update(){
+        // calculate all the breakpoints and heights
+        const viewportTop = this.$.container.scrollTop;
+        const viewportHeight = this.$.container.offsetHeight;
+        const renderedRowsTop = this.$.top.offsetHeight;
+        const renderedRowsHeight = 5*viewportHeight;
+        const shiftUpwardsBreakpoint = renderedRowsTop + 1*viewportHeight;
+        const shiftDownwardsBreakpoint = renderedRowsTop + 3*viewportHeight;      
+        this.currentScrollPosition = this.$.container.scrollTop;
+        
+       // First checks that should we go up and not already in top.
+       // Second checks that should we go down and not already at bottom.
+        if((viewportTop<shiftUpwardsBreakpoint && renderedRowsTop !=0) ||
+          (viewportTop+viewportHeight>shiftDownwardsBreakpoint) && (renderedRowsTop + renderedRowsHeight < this.fullHeight)){
+          const newRenderedRowsTop = viewportTop-2*viewportHeight
+          this._shiftRows(newRenderedRowsTop,renderedRowsHeight,viewportTop,viewportHeight);
+        }
+      }
+
+      _shiftRows(renderedRowsTop, renderedRowsHeight, viewportTop, viewportHeight){
+        let newRenderedRowsTop = renderedRowsTop-viewportHeight;
+        if(newRenderedRowsTop<0){
+          newRenderedRowsTop = 0;
+        }
+        if(newRenderedRowsTop>this.fullHeight-3*viewportHeight){
+            newRenderedRowsTop = this.fullHeight-3*viewportHeight;
+        }
+        const rowsBeforeNewTop = Math.floor(newRenderedRowsTop / this.oneRowHeight);
+        let rowsInRange = Math.ceil(renderedRowsHeight / this.oneRowHeight);
+        const totalRows = this._getCount();
+        if(rowsBeforeNewTop+rowsInRange>totalRows){
+          rowsInRange=totalRows-rowsBeforeNewTop;
+          console.log("start: " + rowsBeforeNewTop + ", end: " + (rowsBeforeNewTop+rowsInRange));
+        }
+        const pixelsLeftBelow = (this._getCount()-(rowsBeforeNewTop+rowsInRange))*this.oneRowHeight;
+        this.$.top.style.height = newRenderedRowsTop + "px";
+        this.$.bottom.style.height = pixelsLeftBelow + "px" ;
+        // Prohibit extra scroll events that would make this code run amok.
+        this.$.container.scrollTop = this.currentScrollPosition;
+
+        this._loadData(rowsBeforeNewTop, rowsInRange);
+      }
+
+      _loadData(start, amount){
+        // TODO: optimize. Now it throws out everything and starts over.
+        // 1. remove items with index before start
+        // 2. append items with index between this.rows last and start+amount
+        console.log("requesting rows: " + start + "-" + (start+amount));
+        const rows = [];
+        for(let index = start; index < start + amount; index++){
+          const row = this._getRow(index);
+          rows.push(row);
+        }
+        this.rows = rows;
+       
+      }
+
+      _getInitialData(){
+        const rows = [];
+        for(let index = 0; index < 10; index++){
+          const row = this._getRow(index);
+          rows.push(row);
+        }
+        this.rows = rows;
+      }
+
+      _appendRows(start, amount){
+        for(let index = start; index < start + amount; index++){
+          const row = this._getRow(index);
+          this.push('rows', row);
+          
+          //this.rows.push(row);
+          //this.notifyPath("rows");
+        }
+      }
+
+      _getRow(index){
+        const row = {};
+        row.index = index;
+        row.data = [];
+        for(let column = 0; column < 20; column++){
+          row.data[column] = "Row " + (index) +", Column " + (column);
+        }
+        if(index%8 == 0){
+          row.special = true;
+        }
+        return row;
+      }
+
+      _getCount(){
+        return 4123;
+      }
+    }
+
+    window.customElements.define(ApolloScroll.is, ApolloScroll);
+  </script>
+</dom-module>
